@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "tables": {
+    "entries": {
+      "access": "owner",
+      "ownerColumn": "created_by",
+      "columns": { "content": "text" }
+    }
+  }
+}

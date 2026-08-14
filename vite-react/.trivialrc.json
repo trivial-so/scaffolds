@@ -1,0 +1,32 @@
+{
+  "scaffoldVersion": "1.1.1",
+  "framework": "vite-react",
+  "ownership": {
+    "system": [
+      "vite.config.ts",
+      "tsconfig.json",
+      "tsconfig.node.json",
+      ".trivialrc.json",
+      "site.config.json",
+      "src/lib/trivial-auth.ts",
+      "src/lib/trivial-data.ts",
+      "src/trivial.config.json"
+    ],
+    "user": [
+      "src/pages/**",
+      "src/components/**",
+      "src/lib/**",
+      "src/index.css",
+      "src/main.tsx",
+      "index.html",
+      "public/**",
+      "README.md",
+      "trio.md",
+      "package.json",
+      ".gitignore",
+      "handlers/**",
+      "src/trivial.manifest.json"
+    ]
+  },
+  "notes": "system files may be overwritten on scaffold upgrade; user files are never touched. package.json is user-owned because users add their own deps. The vendored Trivial SDK (src/lib/trivial-{auth,data}.ts) and the build-injected src/trivial.config.json are SYSTEM-owned (more specific than the src/lib/** user glob) \u2014 the platform manages them. The SDK is dormant until the maker declares src/trivial.manifest.json and publishes (the retired src/pages/dynamic-demo.tsx referenced demo tables that no longer exist for new projects; older projects keep their user-owned copy)."
+}

@@ -1,0 +1,21 @@
+# Pin vite's transitive build tool forward: esbuild <0.28.1 carries
+# GHSA-gv7w-rqvm-qjhr, and a published project is scanned for advisories.
+# Installs run with --ignore-scripts and esbuild ships its platform binary as
+# an optional dep, so no onlyBuiltDependencies allowlist is needed.
+overrides:
+  esbuild: '>=0.28.1'
+  # postcss <=8.5.17 carries GHSA-r28c-9q8g-f849 (path traversal via
+  # sourceMappingURL auto-loading). Transitive under vite (which asks for
+  # ^8.5.3), so the floor has to be forced here or every scaffolded project
+  # inherits the advisory. Build-time only — it never ships in the static
+  # output — but a high advisory in the tree is noise the author shouldn't
+  # have to explain away.
+  postcss: '>=8.5.18'
+
+# esbuild works without its postinstall (the platform binary ships as an
+# optional dep; Trivial's build installs with --ignore-scripts for
+# the same reason). allowBuilds: false = never run its scripts and don't
+# fail installs over it, so plain `pnpm install` + `pnpm build` work
+# out of the box on pnpm 11.
+allowBuilds:
+  esbuild: false

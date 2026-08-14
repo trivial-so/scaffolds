@@ -1,0 +1,4 @@
+{
+  "framework": "vite-react",
+  "buildCommand": "pnpm run build"
+}
