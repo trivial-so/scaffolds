@@ -13,7 +13,7 @@ When in doubt, subtract.
 - Don't invent hex outside the palette.
 
 ## 2. Color & roles
-`--background` off-white `#fafafa` (never pure white) · `--foreground` off-black `#111` (never pure black) · `--primary` cobalt `#2f6feb` (the one accent, used ≤2× per screen: the hero element + the CTAs, locked page-wide) · `--muted-foreground` `#6b6b6b` · `--border` `#e5e5e5` · `--card` white · `--destructive` red. Budget: ~70-90% neutral / 5-10% accent / <5% semantic.
+`--background` off-white `#fafafa` (never pure white) · `--foreground` off-black `#111` (never pure black) · `--primary` cobalt `#165ce9` (the one accent, used ≤2× per screen: the hero element + the CTAs, locked page-wide) · `--muted-foreground` `#6b6b6b` · `--border` `#e5e5e5` · `--card` white · `--destructive` red. Budget: ~70-90% neutral / 5-10% accent / <5% semantic.
 
 ## 3. Typography
 Body 16px, line-height 1.5; headings tight (1.2). **≤3 type sizes per screen**; control hierarchy with weight + color, not raw size. Don't default everything to 700-bold. Display type gets slightly negative tracking.

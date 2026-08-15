@@ -36,7 +36,7 @@ runs server-side. Same wire, same behavior.
 ## Calling your routes from pages
 
 ```ts
-import { apiFetch } from '../src/lib/trivial-auth';
+import { apiFetch } from '@/lib/trivial-auth';
 
 const { rows } = await (await apiFetch('/api/notes')).json();
 await apiFetch('/api/notes', {

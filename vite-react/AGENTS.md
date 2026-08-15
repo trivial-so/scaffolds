@@ -81,8 +81,9 @@ request/response only - no timers outliving the request, no cron. Full contract:
 
 **Sign-in** uses the vendored `trivial-auth` toolkit (`src/lib/trivial-auth.ts`):
 `signIn` / `signOut` / `getUser` / `onUser` / `useUser` / `sendPasswordReset`. `signIn()` navigates
-to the hosted sign-in page on the app's own origin (registration happens there too) and returns the
-end-user; in the workshop preview it opens the test-user picker. Build the sign-in button and the
+to the hosted sign-in page on the app's own origin (registration happens there too) and brings the
+visitor back - it resolves with no value, so read the user via `useUser()` / `getUser()`; in the
+workshop preview it opens the test-user picker. Build the sign-in button and the
 signed-in/out states - never password forms. Auth turns on when a non-public table is declared.
 
 **Design** uses the shipped design system - semantic tokens only (`bg-background`, `text-foreground`,
@@ -91,7 +92,8 @@ signed-in/out states - never password forms. Auth turns on when a non-public tab
 **Dependencies.** A curated pool of popular libraries (framer-motion, lucide-react, recharts,
 zustand, @tanstack/react-query, react-hook-form, zod, date-fns, three, and the common Radix
 primitives) auto-installs on any plan when you import it and save (the full pool list ships in
-the docs and llms-full.txt). Packages outside the pool work within the plan's dependency quota:
+the docs: https://docs.trivial.so/md/reference/dependencies.md). Packages outside the pool work
+within the plan's dependency quota:
 Plus auto-installs them on save; Basic installs them on an explicit Build or Publish. Handlers
 ignore the pool entirely - their import allowlist above is the whole list.
 
