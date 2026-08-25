@@ -82,6 +82,20 @@ export interface SelectOptions<T extends Row = Row> {
   count?: boolean;
 }
 
+/**
+ * What a `file` column holds — a reference to bytes stored outside the database. You get one from
+ * `db.upload()` and save it straight into the column; never build one by hand.
+ *
+ * There is no URL in it, on purpose: the right URL depends on who is asking, and a URL saved into a
+ * row would outlive the access rule that justified it.
+ */
+export interface FileRef {
+  id: string;
+  name: string | null;
+  size: number;
+  type: string;
+}
+
 /** Thrown on any non-2xx data-API response. `status` mirrors the HTTP status (e.g. 401, 403, 404). */
 export class TrivialDataError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -202,9 +216,70 @@ function requireConfigured(): void {
   }
 }
 
+const fileUrlFor = (id: string): string =>
+  `${baseUrl()}/api/files/${encodeURIComponent(config.projectId)}/${encodeURIComponent(id)}`;
+
 /** The data client. `db.from('notes').select() / .insert() / .update() / .delete()`. */
 export const db = {
   from: (table: string): TableQuery => new TableQuery(table),
+
+  /**
+   * Upload a file and get the reference to save in a `file` column.
+   *
+   *   const ref = await db.upload(input.files[0])
+   *   await db.from('posts').insert({ title, photo: ref })
+   *
+   * The bytes are sent as the request body, so nothing is copied into memory first. Until you save
+   * the reference to a row, the file is visible only to you — which is what lets you show a preview
+   * before submitting.
+   */
+  async upload(file: Blob, name?: string): Promise<FileRef> {
+    requireConfigured();
+    const headers: Record<string, string> = {
+      'Content-Type': file.type || 'application/octet-stream',
+    };
+    const label = name ?? (file as File).name;
+    if (label) headers['X-Trivial-Filename'] = label;
+    const token = await getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${baseUrl()}/api/files/${encodeURIComponent(config.projectId)}`, {
+      method: 'POST', headers, credentials: 'omit', body: file,
+    });
+    const text = await res.text();
+    let data: unknown;
+    try { data = text ? JSON.parse(text) : undefined; } catch { data = undefined; }
+    if (!res.ok) {
+      throw new TrivialDataError(res.status, (data as { error?: string })?.error || `Upload failed (${res.status})`);
+    }
+    return data as FileRef;
+  },
+
+  /**
+   * A plain URL for a file — use it directly in `<img src>` / `<a href>`.
+   *
+   * **This works for files whose row anyone can read** (a `public` table). It carries no credentials,
+   * because an `<img>` tag cannot send them — so for a file on an `owner` or `authenticated` table,
+   * use `fileObjectUrl` instead. Passing null gives null, so it is safe on an empty column.
+   */
+  fileUrl(ref: FileRef | null | undefined): string | null {
+    return ref?.id ? fileUrlFor(ref.id) : null;
+  },
+
+  /**
+   * A URL for a file that needs the signed-in user's credentials — an `owner` table's photo, say.
+   *
+   * Fetches the bytes with your token and hands back a local object URL. **Call `URL.revokeObjectURL`
+   * when the element goes away**, or the bytes stay in memory for the life of the page.
+   */
+  async fileObjectUrl(ref: FileRef | null | undefined): Promise<string | null> {
+    if (!ref?.id || !isConfigured()) return null;
+    const headers: Record<string, string> = {};
+    const token = await getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(fileUrlFor(ref.id), { headers, credentials: 'omit' });
+    if (!res.ok) throw new TrivialDataError(res.status, `Could not load the file (${res.status})`);
+    return URL.createObjectURL(await res.blob());
+  },
 };
 
 // ── useTable — the one-line React binding ────────────────────────────────────
