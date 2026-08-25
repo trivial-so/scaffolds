@@ -77,6 +77,10 @@ server-side; **never filter rows by the current user in app code.**
 - `owner` + `ownerColumn` - each end-user sees only their own rows (the platform stamps the owner;
   never set it yourself).
 - `role` + `role`, or `managed` + `ownerColumn` (owner-or-admin).
+- `group` + `groupColumn` + `membershipTable` - a TEAM's rows, shared by everyone in it (a shared
+  workspace, a company account, a family plan). The membership table says who is in which team; it
+  must declare `ownerColumn` and must NOT be writable by end-users (`write: "server"` or
+  `"admin"`), because whoever can write it can join any team. Publishing refuses it otherwise.
 - `insert: 'anyone'` - the one modifier that lets signed-out people CREATE rows (a guestbook /
   contact form). Valid only with `public` or `owner`. For a signed-out-write form, add a hidden field
   named `_hp` (a honeypot); the platform silently drops bot submissions that fill it.
