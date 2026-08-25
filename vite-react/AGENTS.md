@@ -148,6 +148,7 @@ the build tell you.
 - `src/lib/trivial-data.ts` - the data SDK (`useTable`, `db`). `src/lib/trivial-tables.ts` - generated row types.
 - `src/lib/trivial-auth.ts` - the auth toolkit.
 - `handlers/` - server routes (see `handlers/README.md`).
+- `jobs/` - work that runs on a schedule, with no URL (see `jobs/README.md`).
 - `DESIGN.md` - the design system (read before styling).
 - `src/components/ui/` - shared components.
 
