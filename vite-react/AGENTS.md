@@ -40,6 +40,24 @@ migrations, or a database driver.** Model changes at publish are additive: nothi
 and a rename is old-kept + new-empty - data does not move. Read and write only through the vendored SDK:
 - In a component: `const { rows, loading, error, insert, update, remove } = useTable('todos')`.
 - Elsewhere: `db.from('todos')` (`.select()` / `.insert()` / `.update()` / `.delete()`).
+
+**Narrow the read in the DATABASE, not in the component.** Both `useTable` and
+`.select()` take `{ where, sort, order, limit, count }`:
+
+```ts
+const { rows, total } = useTable('products', {
+  where: { in_stock: true, price: { lte: 2000 }, title: { contains: query } },
+  sort: 'price', order: 'asc', limit: 20, count: true,
+})
+```
+
+Operators: `eq` `ne` `gt` `gte` `lt` `lte` `in` `contains` — a bare value means
+equals, `null` means "empty", and `contains` is a case-insensitive substring
+match on a text column (the search box). `count: true` adds `total`, the number
+of matching rows. `select()` returns `nextCursor`; pass it back as `cursor` for
+the next page and never construct one yourself.
+`rows.filter(...)` in a component filters only the page you fetched, so it drops
+matches that were on the next one — reach for `where` instead.
 Rows are typed from `src/lib/trivial-tables.ts` (regenerated on every manifest save; every
 declared column is nullable in TS, `id` is a number, `created_at` an ISO string). RLS scopes rows
 server-side; **never filter rows by the current user in app code.**
@@ -71,10 +89,17 @@ Anything outside this vocabulary is rejected at write.
 **Server routes** live in `handlers/<name>.ts` and answer `/api/<name>` (lowercase letters,
 digits, dashes or underscores - so `handlers/blog_posts.ts` owns `/api/blog_posts`). Export a named
 `function buildApp(ctx)` returning a Hono app; reach data through `ctx` only
-(`ctx.list` / `ctx.insert` / `ctx.update` / `ctx.remove`). The import allowlist is `hono`,
-`drizzle-orm`, `zod`, `nanoid`, `date-fns`, and your own project files. No `fetch` / `eval` /
-`process` / `require` / `WebSocket`, no node builtins - the outbound-network lock applies to
-handlers only (pages are a normal browser app and may call public APIs). Reserved route names
+(`ctx.list` / `ctx.insert` / `ctx.update` / `ctx.remove`). You may import any package this project declares in `package.json`, plus your own project
+files — add a dependency the ordinary way and a route can use it. Never a Node builtin
+(`fs`/`net`/`child_process`/…) or a database driver. In a handler, these are refused at write: `eval`, `Function`,
+`process`, `require`, `importScripts`, `WebSocket`, `XMLHttpRequest`, and the global objects
+`globalThis` / `global` / `self` / `window` (pages are a normal browser app and may use `window`
+freely - this list is handlers only). Ordinary `fetch` DOES work and is the project's egress
+channel, so third-party SDKs work as written - but it reaches only services enabled for this
+project (Site tab, External services), and anything else is refused with `egress blocked`.
+Enabling a service and setting its key are separate steps. API keys go in project secrets, read as
+`ctx.secrets.NAME` - never written into source. The egress lock applies to handlers only (pages
+are a normal browser app and may call public APIs). Reserved route names
 (data, auth, admin, login, webhooks, health, and similar) are refused. Handlers are
 request/response only - no timers outliving the request, no cron. Full contract:
 `handlers/README.md`.
@@ -95,7 +120,7 @@ primitives) auto-installs on any plan when you import it and save (the full pool
 the docs: https://docs.trivial.so/md/reference/dependencies.md). Packages outside the pool work
 within the plan's dependency quota:
 Plus auto-installs them on save; Basic installs them on an explicit Build or Publish. Handlers
-ignore the pool entirely - their import allowlist above is the whole list.
+resolve their imports from what this project declares in `package.json`, not from the pool.
 
 **Ownership.** These files ARE the app's real source, in an open format. You edit them in place.
 The `trivial` CLI can create or clone the project into a folder, run it locally with its data, move
@@ -128,7 +153,7 @@ the build tell you.
 
 ## The stack
 
-Vite 6 + React 18 + TypeScript + Tailwind. Output is a fast static build, plus the dynamic run-layer
+Vite 6 + React 19 + TypeScript + Tailwind. Output is a fast static build, plus the dynamic run-layer
 (data, auth, server handlers) when the manifest declares it. You never configure the toolchain: edit
 source, and the platform builds it.
 

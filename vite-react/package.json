@@ -18,8 +18,8 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.34",
     "nanoid": "^5.1.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
     "tailwind-merge": "^3.4.0",
     "zod": "^3.23.0"
@@ -27,9 +27,9 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.10.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^5.2.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.4.3",

@@ -34,13 +34,52 @@ export type Row = Record<string, unknown>;
 
 export interface Page<T extends Row = Row> {
   rows: T[];
-  /** Pass back as `select({ cursor })` for the next page; null when there are no more. */
-  nextCursor: number | null;
+  /** Pass back as `select({ cursor })` for the next page; null when there are no more. Hand it back
+   *  as you got it — it is a row id for an id-ordered page and an opaque token for a sorted one. */
+  nextCursor: number | string | null;
+  /** How many rows match in total (the whole filtered set, not just this page). Present only when
+   *  you ask for it with `count: true` — it costs a second query, so it is never implicit. */
+  total?: number;
 }
 
-export interface SelectOptions {
-  cursor?: number | null;
+/** A value a filter compares against. */
+export type FilterValue = string | number | boolean | null;
+
+/** The comparison operators. Use exactly one per column: `{ price: { lte: 2000 } }`. */
+export type FilterOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte';
+
+/**
+ * One column's condition. A bare value is equality — and `null` means "is empty", which is what
+ * everyone means by `{ assigned_to: null }` (plain SQL equality against null matches nothing).
+ */
+export type Filter =
+  | FilterValue
+  | Partial<Record<FilterOp, FilterValue>>
+  | { in: FilterValue[] }
+  /** Case-insensitive substring match on a text column — the search box.
+   *  `{ title: { contains: query } }`. What the visitor typed is matched literally, so a `%`
+   *  is a percent sign rather than a wildcard. */
+  | { contains: string };
+
+/** `{ status: 'paid', price: { lte: 2000 } }` — every condition must hold (they are AND-ed).
+ *  Declared columns autocomplete; the server rejects a column that does not exist. */
+export type Where<T extends Row = Row> = Partial<Record<keyof T & string, Filter>>;
+
+export interface SelectOptions<T extends Row = Row> {
+  cursor?: number | string | null;
   limit?: number;
+  /** Sort by a column — `{ sort: 'price', order: 'asc' }` for cheapest first. Without it, rows come
+   *  back in the order they were created. Paging stays correct across a sort, including rows where
+   *  the column is empty. */
+  sort?: (keyof T & string) | (string & {});
+  /** Filter server-side. The database does the work and the page you get back is already the answer
+   *  — filtering `rows` in the browser only ever filters the page you happened to fetch. */
+  where?: Where<T>;
+  /** Direction: `'asc'` (the default) or `'desc'`. Applies to `sort` when you give one, and to the
+   *  creation order when you don't — so `{ order: 'desc' }` alone is "newest first". */
+  order?: 'asc' | 'desc';
+  /** Also return `total` — the number of matching rows. One extra query; opt in when you need it. */
+  count?: boolean;
 }
 
 /** Thrown on any non-2xx data-API response. `status` mirrors the HTTP status (e.g. 401, 403, 404). */
@@ -58,6 +97,24 @@ export class TrivialDataError extends Error {
 const baseUrl = (): string => config.dataApiBaseUrl.replace(/\/$/, '');
 const tableUrl = (table: string): string =>
   `${baseUrl()}/api/data/${encodeURIComponent(config.projectId)}/${encodeURIComponent(table)}`;
+
+/**
+ * Build the read query string. The filter travels as ONE parameter holding JSON, rather than as
+ * `where[price][lte]=2000`, so its values keep their TYPES on the way to the server: 2000 stays a
+ * number and null stays null. A bracket form would turn both into strings and the server would have
+ * to guess which ones you meant as numbers.
+ */
+function selectQuery(opts: SelectOptions): string {
+  const qs = new URLSearchParams();
+  if (opts.limit != null) qs.set('limit', String(opts.limit));
+  if (opts.cursor != null) qs.set('cursor', String(opts.cursor));
+  if (opts.order != null) qs.set('order', opts.order);
+  if (opts.sort != null) qs.set('sort', opts.sort);
+  if (opts.count) qs.set('count', '1');
+  if (opts.where && Object.keys(opts.where).length) qs.set('where', JSON.stringify(opts.where));
+  const q = qs.toString();
+  return q ? `?${q}` : '';
+}
 
 async function request<T>(method: string, url: string, body?: Row): Promise<T> {
   const headers: Record<string, string> = {};
@@ -111,15 +168,12 @@ onUser((u) => {
 class TableQuery {
   constructor(private readonly table: string) {}
 
-  /** Keyset-paginated read. RLS scopes the result to the caller (own rows for owner tables; all for
-   *  public). Returns an empty page when the project isn't wired yet (inert flag-off behaviour). */
+  /** Keyset-paginated read, filtered and ordered server-side. RLS scopes the result to the caller
+   *  (own rows for owner tables; all for public). Returns an empty page when the project isn't wired
+   *  yet (inert flag-off behaviour). */
   async select(opts: SelectOptions = {}): Promise<Page> {
     if (!isConfigured()) return { rows: [], nextCursor: null };
-    const qs = new URLSearchParams();
-    if (opts.limit != null) qs.set('limit', String(opts.limit));
-    if (opts.cursor != null) qs.set('cursor', String(opts.cursor));
-    const q = qs.toString();
-    return request<Page>('GET', `${tableUrl(this.table)}${q ? `?${q}` : ''}`);
+    return request<Page>('GET', `${tableUrl(this.table)}${selectQuery(opts)}`);
   }
 
   /** Insert a row. The owner column is stamped server-side from the verified token — any `owner` in
@@ -161,6 +215,17 @@ export const db = {
 // right rows). RLS scopes everything server-side — an `owner` table needs no
 // user filtering in your code, ever.
 //
+// Narrow it with `where` / `order` / `count`, and the DATABASE does the work:
+//
+//   const { rows, total } = useTable('products', {
+//     where: { in_stock: true, price: { lte: 2000 } },
+//     sort: 'price', order: 'asc', limit: 20, count: true,
+//   })
+//
+// Reach for that rather than `rows.filter(...)` in the component: a page holds
+// the rows you fetched, so filtering it in the browser silently drops matches
+// that were on page two.
+//
 // Types come from `./trivial-tables` (generated from src/trivial.manifest.json
 // whenever you save the manifest): rows autocomplete your declared columns.
 // Tables not in the manifest still work — their rows are just untyped.
@@ -171,6 +236,8 @@ type RowOf<K extends string> = K extends keyof Tables ? Tables[K] & Row : Row;
 
 export interface UseTableResult<T extends Row> {
   rows: T[];
+  /** Matching rows in total, ignoring paging — only when you pass `count: true`. */
+  total?: number;
   /** True during the initial fetch (and any refetch that follows a user change). */
   loading: boolean;
   error: TrivialDataError | null;
@@ -185,10 +252,20 @@ export interface UseTableResult<T extends Row> {
 
 export function useTable<K extends TableName>(
   table: K,
-  opts: { limit?: number } = {},
+  opts: {
+    limit?: number;
+    /** Filtered server-side — `useTable('orders', { where: { status: 'paid' } })`. */
+    where?: Where<RowOf<K & string>>;
+    /** Sort by a column: `{ sort: 'price', order: 'asc' }`. */
+    sort?: (keyof RowOf<K & string> & string) | (string & {});
+    order?: 'asc' | 'desc';
+    /** Ask for `total` as well as the page. */
+    count?: boolean;
+  } = {},
 ): UseTableResult<RowOf<K & string>> {
   type T = RowOf<K & string>;
   const [rows, setRows] = useState<T[]>([]);
+  const [total, setTotal] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<TrivialDataError | null>(null);
   const alive = useRef(true);
@@ -197,12 +274,24 @@ export function useTable<K extends TableName>(
     return () => { alive.current = false; };
   }, []);
 
-  const limit = opts.limit;
+  const { limit, order, sort, count } = opts;
+  // `where` is tracked by VALUE, not by identity. `useTable('orders', { where: { status: 'paid' } })`
+  // builds a fresh object every render, so depending on the object itself would refetch forever —
+  // the classic React filter loop, and the one thing that would make this hook unusable for exactly
+  // the case it was added for.
+  const whereKey = opts.where && Object.keys(opts.where).length ? JSON.stringify(opts.where) : '';
   const refetch = useCallback(async () => {
     try {
-      const page = await db.from(table).select(limit != null ? { limit } : {});
+      const page = await db.from(table).select({
+        ...(limit != null ? { limit } : {}),
+        ...(whereKey ? { where: JSON.parse(whereKey) as Where } : {}),
+        ...(order != null ? { order } : {}),
+        ...(sort != null ? { sort } : {}),
+        ...(count ? { count: true } : {}),
+      });
       if (!alive.current) return;
       setRows(page.rows as T[]);
+      setTotal(page.total);
       setError(null);
     } catch (e) {
       if (!alive.current) return;
@@ -210,7 +299,7 @@ export function useTable<K extends TableName>(
     } finally {
       if (alive.current) setLoading(false);
     }
-  }, [table, limit]);
+  }, [table, limit, whereKey, order, sort, count]);
 
   // Initial fetch + refetch whenever the signed-in identity changes
   // (sign-in, sign-out, or the workshop's preview view-as switching).
@@ -234,5 +323,5 @@ export function useTable<K extends TableName>(
     await refetch();
   }, [table, refetch]);
 
-  return { rows, loading, error, insert, update, remove, refetch };
+  return { rows, total, loading, error, insert, update, remove, refetch };
 }
