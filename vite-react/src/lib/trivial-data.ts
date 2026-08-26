@@ -178,29 +178,31 @@ onUser((u) => {
   void request('GET', tableUrl('identity_probe')).catch(() => { /* 404 expected — the echo is the point */ });
 });
 
-/** A bound query builder for a single table. */
-class TableQuery {
+/** A bound query builder for a single table, typed from your manifest when the table name is one
+ *  it declares — so `db.from('posts').select()` gives back `PostsRow[]`, not bare objects. A name
+ *  the manifest doesn't know still works and falls back to `Row`. */
+class TableQuery<T extends Row = Row> {
   constructor(private readonly table: string) {}
 
   /** Keyset-paginated read, filtered and ordered server-side. RLS scopes the result to the caller
    *  (own rows for owner tables; all for public). Returns an empty page when the project isn't wired
    *  yet (inert flag-off behaviour). */
-  async select(opts: SelectOptions = {}): Promise<Page> {
+  async select(opts: SelectOptions<T> = {}): Promise<Page<T>> {
     if (!isConfigured()) return { rows: [], nextCursor: null };
-    return request<Page>('GET', `${tableUrl(this.table)}${selectQuery(opts)}`);
+    return request<Page<T>>('GET', `${tableUrl(this.table)}${selectQuery(opts as SelectOptions)}`);
   }
 
   /** Insert a row. The owner column is stamped server-side from the verified token — any `owner` in
    *  `values` is ignored. Requires a configured project (throws otherwise). */
-  async insert(values: Row): Promise<Row> {
+  async insert(values: Row): Promise<T> {
     requireConfigured();
-    return request<Row>('POST', tableUrl(this.table), values);
+    return request<T>('POST', tableUrl(this.table), values);
   }
 
   /** Update an owned row by id. RLS scopes which rows are visible/writable; `id`/`owner` are immutable. */
-  async update(id: string | number, values: Row): Promise<Row> {
+  async update(id: string | number, values: Row): Promise<T> {
     requireConfigured();
-    return request<Row>('PATCH', `${tableUrl(this.table)}/${encodeURIComponent(String(id))}`, values);
+    return request<T>('PATCH', `${tableUrl(this.table)}/${encodeURIComponent(String(id))}`, values);
   }
 
   /** Delete an owned row by id (RLS-scoped). */
@@ -221,7 +223,8 @@ const fileUrlFor = (id: string): string =>
 
 /** The data client. `db.from('notes').select() / .insert() / .update() / .delete()`. */
 export const db = {
-  from: (table: string): TableQuery => new TableQuery(table),
+  from: <K extends keyof Tables | (string & {})>(table: K): TableQuery<RowOf<K & string>> =>
+    new TableQuery<RowOf<K & string>>(table as string),
 
   /**
    * Upload a file and get the reference to save in a `file` column.

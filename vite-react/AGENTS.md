@@ -82,7 +82,11 @@ server-side; **never filter rows by the current user in app code.**
   must declare `ownerColumn` and must NOT be writable by end-users (`write: "server"` or
   `"admin"`), because whoever can write it can join any team. Publishing refuses it otherwise.
 - `insert: 'anyone'` - the one modifier that lets signed-out people CREATE rows (a guestbook /
-  contact form). Valid only with `public` or `owner`. For a signed-out-write form, add a hidden field
+  contact form). Valid with `public`, `managed`, or `owner`. **For an inbox you can read, use
+  `managed` + `ownerColumn`**: an anonymous insert stamps no owner, so on an `owner` table the rows
+  are owned by nobody and NO identity can read them back - the maker's own list renders empty
+  forever. `managed` is the same private table with an admin disjunct, which is the way in.
+  For a signed-out-write form, add a hidden field
   named `_hp` (a honeypot); the platform silently drops bot submissions that fill it.
 Anything outside this vocabulary is rejected at write.
 
@@ -105,8 +109,8 @@ Enabling a service and setting its key are separate steps. API keys go in projec
 `ctx.secrets.NAME` - never written into source. The egress lock applies to handlers only (pages
 are a normal browser app and may call public APIs). Reserved route names
 (data, auth, admin, login, webhooks, health, and similar) are refused. Handlers are
-request/response only - no timers outliving the request, no cron. Full contract:
-`handlers/README.md`.
+request/response only - no timers outliving the request. Clock-driven work goes in `jobs/`
+(see `jobs/README.md`), not in a handler. Full contract: `handlers/README.md`.
 
 **Sign-in** uses the vendored `trivial-auth` toolkit (`src/lib/trivial-auth.ts`):
 `signIn` / `signOut` / `getUser` / `onUser` / `useUser` / `sendPasswordReset`. `signIn()` navigates

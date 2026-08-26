@@ -25,6 +25,19 @@ The contract (enforced automatically at write and publish):
   `ctx.remove(table, id)`. No raw SQL, no DB drivers. Rows are scoped by the
   access declared in `src/trivial.manifest.json` — the platform generates
   all row security; never write policies yourself.
+- `ctx.batch([...ops])` runs several writes in ONE transaction — all of them
+  commit or none do. Reach for it when two writes must not be able to
+  half-happen: taking payment and recording fulfilment, the two sides of a
+  transfer. Results come back positionally, and a failure names which op failed.
+- `ctx.user` is who is calling: `{ id, role }`, or `null` when the request is
+  anonymous. The id comes from the visitor's verified token, never from
+  anything the request can claim, and it is the same identity your `ctx` reads
+  and writes are scoped to — so it is what you check when the rule is "only a
+  member may do this". Handle the `null` case: most requests have no user.
+- `ctx.site` is your app's own address, e.g. `https://yourhandle.trivial.build`. Use it
+  for anything that has to point back here — a payment provider's return
+  URL, a redirect, a link in an email. The request itself cannot tell you:
+  your code runs behind a proxy, so its own URL is a loopback address.
 - `ctx.list` narrows in the DATABASE, so reach for it before you loop:
   `{ where, sort, order, limit, cursor, count }`.
   - `where` — `{ status: 'paid', price: { lte: 2000 }, id: { in: [1,2,3] } }`.
@@ -54,6 +67,38 @@ export function buildApp(ctx) {
 
 In the workshop this runs against build-side data; published, the same code
 runs server-side. Same wire, same behavior.
+
+## Two people writing the same row
+
+`ctx.update(table, id, values, { where })` writes only if the row still matches — a
+compare-and-set, and how you claim a seat or take the last item without handing it
+out twice.
+
+**A lost race THROWS** (status `412`, code `RUN_DATA_PRECONDITION`). It does not
+return `null`. Catch it, re-read, decide again, and bound the loop:
+
+```ts
+try {
+  await ctx.update('seats', id, { taken_by: who }, { where: { taken_by: null } });
+} catch (e) {
+  if (e.status !== 412) throw e;   // a real failure, not a lost race
+  // somebody got there first — read again and re-decide
+}
+```
+
+Then check you actually succeeded. A handler with the wrong branch upholds every
+invariant and sells one item out of ten, silently — a shop that has stopped selling
+looks exactly like a shop with no customers.
+
+## Streaming, and the one rule that comes with it
+
+Answer with `content-type: text/event-stream` and the platform pipes your response
+through instead of buffering it.
+
+**Write anything you need to keep BEFORE the stream starts.** When the client stops
+reading — which every well-behaved client does once it has what it came for — the
+connection closes and your handler is torn down with it. Code after the last byte may
+never run, so metering, logging and cleanup belong before the first byte.
 
 ## Calling your routes from pages
 
