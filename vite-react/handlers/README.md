@@ -25,6 +25,21 @@ The contract (enforced automatically at write and publish):
   `ctx.remove(table, id)`. No raw SQL, no DB drivers. Rows are scoped by the
   access declared in `src/trivial.manifest.json` — the platform generates
   all row security; never write policies yourself.
+- **Your reads are scoped to whoever called the route**, the same as they are in a page. A handler
+  does not see more than its caller just by being server code.
+
+  One exception, and you opt into it: a table declared `access: "owner"` **with `write: "server"`**
+  can be read WHOLE by the server, because that is what lets a webhook find the order it has to mark
+  paid when there is no signed-in buyer to scope by. Ask for it and it is yours:
+
+  ```ts
+  const mine = await ctx.list('orders');                       // the caller's rows
+  const one  = await ctx.list('orders', {                       // the server's view - on purpose
+    where: { stripe_id: id }, as: 'server',
+  });
+  ```
+
+  Only `'server'` turns it on; a typo leaves the read scoped, which is the safe way to fail.
 - `ctx.batch([...ops])` runs several writes in ONE transaction — all of them
   commit or none do. Reach for it when two writes must not be able to
   half-happen: taking payment and recording fulfilment, the two sides of a
@@ -38,6 +53,17 @@ The contract (enforced automatically at write and publish):
   for anything that has to point back here — a payment provider's return
   URL, a redirect, a link in an email. The request itself cannot tell you:
   your code runs behind a proxy, so its own URL is a loopback address.
+- `ctx.batch([...])` takes operation SPECS and runs them in one transaction. It does not take
+  `ctx.insert()` promises, and `Promise.all` is not atomic:
+
+  ```ts
+  const [note, audit] = await ctx.batch([
+    { op: 'insert', table: 'notes', values: { title, status: 'pending' } },
+    { op: 'insert', table: 'audit', values: { action: 'submitted' } },
+  ]);
+  ```
+
+  Up to 20 ops are allowed. A failure throws with `batchIndex` and rolls the whole transaction back.
 - `ctx.list` narrows in the DATABASE, so reach for it before you loop:
   `{ where, sort, order, limit, cursor, count }`.
   - `where` — `{ status: 'paid', price: { lte: 2000 }, id: { in: [1,2,3] } }`.

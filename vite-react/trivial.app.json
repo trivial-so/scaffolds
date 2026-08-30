@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "identity": {},
+  "appearance": {
+    "accent": "#2563eb",
+    "mode": "system",
+    "logo": "",
+    "icon": "",
+    "wordmark": ""
+  },
+  "browser": {
+    "themeColor": "#2563eb"
+  },
+  "sharing": {
+    "image": ""
+  }
+}

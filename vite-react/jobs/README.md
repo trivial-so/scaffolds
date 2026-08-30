@@ -25,7 +25,9 @@ Two exports, both required:
   Always **UTC**. It has to be written out literally — the platform reads it without running your
   code, so `schedule = INTERVALS[0]` is refused.
 - **`run(ctx)`** — what to do. The same `ctx` a route gets: `ctx.list` / `ctx.insert` / `ctx.update` /
-  `ctx.remove` / `ctx.batch`, `fetch` through your project's egress policy, and `ctx.secrets`.
+  `ctx.remove` / `ctx.batch`, `fetch` through your project's egress policy, `ctx.secrets`, and
+  `ctx.site` — your app's public origin for links a job writes or sends. A job has no request URL
+  to derive that origin from.
 
 ## What to expect
 

@@ -10,11 +10,13 @@ the conventions and constraints that keep your work working:
 - It is a Trivial app, not a bare Vite app. Do not add a second framework or a separate backend.
 - Data is *declared* in `src/trivial.manifest.json`. Never write SQL, RLS, migrations, or a database
   driver; read and write only through `useTable` / `db` from `@/lib/trivial-data`.
-- The access vocabulary is closed (`public`, `authenticated`, `owner`, `role`, `managed`, and the
-  `insert: 'anyone'` modifier). Anything else is rejected.
+- The access vocabulary is closed (`public`, `authenticated`, `owner`, `role`, `managed`, `group`,
+  plus `insert: 'anyone'` and the `write` axes including `server`). Files are `file` columns;
+  filters/sorts at size need manifest `index` groups. Anything else is rejected.
 - Table and column names are lowercase `snake_case`. Do not declare `id` or `created_at`.
-- Server routes live in `handlers/<name>.ts` and reach data through `ctx` only. The import allowlist
-  is `hono`, `drizzle-orm`, `zod`, `nanoid`, `date-fns`, and project files; no network or system access.
+- Server routes live in root `handlers/<name>.ts` and reach data through `ctx` only. They may import
+  declared dependencies and use egress-gated `fetch`, but no Node builtin/database driver. Signed-in
+  actions check `ctx.user`; pages call them with `apiFetch`; atomic writes use `ctx.batch` op specs.
 - Don't add build or deploy scripts. Use `trivial dev` for the supported local runtime; Build and
   Publish remain project operations. The CLI, authenticated Git remote, and Download source are the
   supported ways to work with project source outside the workshop.

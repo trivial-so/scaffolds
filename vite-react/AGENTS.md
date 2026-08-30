@@ -62,6 +62,11 @@ Rows are typed from `src/lib/trivial-tables.ts` (regenerated on every manifest s
 declared column is nullable in TS, `id` is a number, `created_at` an ISO string). RLS scopes rows
 server-side; **never filter rows by the current user in app code.**
 
+**Files are table columns.** Declare a column as `"file"`; the page calls `const ref = await
+db.upload(file)` and stores that returned reference in the column, then renders it with
+`db.fileUrl(ref)`. Never store an upload as a URL or construct a reference yourself. File access is
+the row's access, including `visibleWhen`.
+
 **The access vocabulary is closed.** Each table in the manifest declares an `access`:
 - `public` - everyone reads; by default all writes are denied (the owner curates rows in the Data
   app). Two optional public-only keys change that:
@@ -81,6 +86,9 @@ server-side; **never filter rows by the current user in app code.**
   workspace, a company account, a family plan). The membership table says who is in which team; it
   must declare `ownerColumn` and must NOT be writable by end-users (`write: "server"` or
   `"admin"`), because whoever can write it can join any team. Publishing refuses it otherwise.
+- `write: "server"` - only this project's handler and job code may write. Unlike the end-user
+  write axes, it is valid with `public` or `owner`; use it when validation or atomicity makes
+  server code the single write path. On an `owner` table it replaces the owner's end-user write.
 - `insert: 'anyone'` - the one modifier that lets signed-out people CREATE rows (a guestbook /
   contact form). Valid with `public`, `managed`, or `owner`. **For an inbox you can read, use
   `managed` + `ownerColumn`**: an anonymous insert stamps no owner, so on an `owner` table the rows
@@ -90,6 +98,11 @@ server-side; **never filter rows by the current user in app code.**
   named `_hp` (a honeypot); the platform silently drops bot submissions that fill it.
 Anything outside this vocabulary is rejected at write.
 
+**Indexes use nested column groups.** A filter/sort that must keep working at size needs an `index`
+on the manifest table: `"index": [["place"], ["created_at"]]`. Each inner array is one index;
+`created_at` is implicit but may be indexed. `unique` uses the same shape for conflict targets:
+`"unique": [["external_id"]]`.
+
 **Names are `snake_case`.** Table and column names are lowercase `snake_case` (`client_projects`,
 `created_by`), never camelCase (Postgres folds it and the data layer 404s). Do not declare `id` or
 `created_at` - they are implicit. Some names are reserved and rejected.
@@ -97,7 +110,14 @@ Anything outside this vocabulary is rejected at write.
 **Server routes** live in `handlers/<name>.ts` and answer `/api/<name>` (lowercase letters,
 digits, dashes or underscores - so `handlers/blog_posts.ts` owns `/api/blog_posts`). Export a named
 `function buildApp(ctx)` returning a Hono app; reach data through `ctx` only
-(`ctx.list` / `ctx.insert` / `ctx.update` / `ctx.remove`). You may import any package this project declares in `package.json`, plus your own project
+(`ctx.list` / `ctx.insert` / `ctx.update` / `ctx.remove` / `ctx.batch`). Register the full route
+inside Hono (`app.post('/api/blog_posts', ...)`, not `/`). `ctx.user` is `{ id, role }` or null;
+reject null with 401 when the action requires a signed-in user. `ctx.site` is the app's public
+origin for redirects and links back; never derive that origin from the proxied request URL.
+Atomic writes take operation specs,
+not promises: `ctx.batch([{ op: 'insert', table: 'orders', values: {...} }, { op: 'insert', table:
+'audit', values: {...} }])`. The page calls authenticated handlers through `apiFetch` from
+`@/lib/trivial-auth`. You may import any package this project declares in `package.json`, plus your own project
 files — add a dependency the ordinary way and a route can use it. Never a Node builtin
 (`fs`/`net`/`child_process`/…) or a database driver. In a handler, these are refused at write: `eval`, `Function`,
 `process`, `require`, `importScripts`, `WebSocket`, `XMLHttpRequest`, and the global objects
