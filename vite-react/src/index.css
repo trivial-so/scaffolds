@@ -69,3 +69,15 @@
     font-family: var(--font-display);
   }
 }
+
+/* The equivalent quiet experience (DESIGN.md §6): motion is removed, never slowed. A page that
+   authors its own animation keeps this path for free; a component that must move under reduced
+   motion (a progress indicator) opts back in with its own rule. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
