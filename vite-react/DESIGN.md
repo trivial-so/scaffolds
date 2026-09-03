@@ -24,3 +24,12 @@ Body 16px, line-height 1.5; headings tight (1.2). **≤3 type sizes per screen**
 ## 5. Do / Don't
 ✅ semantic tokens · one cobalt accent · off-white bg · neutral grays · a real hero visual · varied section layouts · concrete copy with real/labeled numbers.
 ❌ `bg-white` / `text-indigo-*` / `text-gray-*` raw utilities · two accents · pure white/black · three identical centered feature cards · everything centered · **no em-dashes or en-dashes anywhere** (use a hyphen, a comma, or two sentences) · `picsum` random photos as the hero · div-based fake screenshots · empty adjectives ("Elevate / Seamless") · Lorem / "Acme" / "John Doe".
+
+## 6. Motion
+Register **restrained**. Tokens: `--motion-fast` 150ms · `--motion-base` 300ms · `--motion-slow` 600ms · `--motion-ease` (Tailwind: `duration-(--motion-fast) ease-house`). One hero reveal (opacity + 8px rise, 60ms stagger, once); hover = colour/border only; no idle motion; route changes cut. `prefers-reduced-motion` removes motion, never slows it. ❌ `transition: all` · bounce/elastic easings · parallax · a duration that is not a token.
+
+## 7. Graphic language
+Medium: **product imagery and type**. Illustration is drawn in CSS/SVG in the palette (a metric, a mini-chart, a grid on `bg-muted`); photos are real product screenshots in a `border-border` rounded frame; icons are `lucide-react` 1.5px `currentColor`, never emoji. A maker's logo sits in the nav at its own colours; an owned colour becomes `--primary` only if it clears AA, else a hero-only `--brand`. **Drawn, not fetched:** compose a visual slot in CSS/SVG/type, generate an image that matches the subject, or place an honest labelled placeholder (`<figure aria-label="Photo: <subject>">` on `bg-muted`) - never a stock or random-image URL.
+
+## 8. Space
+No scene by default: a 3D ask renders one still object in a bordered product frame. When the direction's media include `spatial-3d`: one `<Canvas>`, `frameloop="demand"`, ≤50k triangles, ≤2 lights, no postprocessing, a poster/SVG stand-in under `prefers-reduced-motion` and while loading; lit and coloured from the tokens, never default grey.

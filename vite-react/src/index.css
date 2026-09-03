@@ -21,6 +21,7 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   --radius: var(--radius);
+  --ease-house: var(--motion-ease);
 }
 
 @layer base {
@@ -52,6 +53,12 @@
     --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    /* B - Motion (DESIGN.md §6): every duration on the page is one of these three and every
+       easing is --motion-ease. A design system swaps this block with its own register. */
+    --motion-fast: 150ms;
+    --motion-base: 300ms;
+    --motion-slow: 600ms;
+    --motion-ease: cubic-bezier(.2,.7,.2,1);
   }
 
   body {

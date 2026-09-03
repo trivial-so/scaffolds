@@ -140,7 +140,9 @@ workshop preview it opens the test-user picker. Build the sign-in button and the
 signed-in/out states - never password forms. Auth turns on when a non-public table is declared.
 
 **Design** uses the shipped design system - semantic tokens only (`bg-background`, `text-foreground`,
-`bg-primary`), never raw Tailwind colors and never AI-indigo. Full rules: `DESIGN.md`.
+`bg-primary`), never raw Tailwind colors and never AI-indigo; motion durations and easing are tokens too
+(`duration-(--motion-fast) ease-house`), and pictures are drawn, generated, or honestly placeholdered - never a
+stock URL. Full rules, including motion, imagery and 3D: `DESIGN.md`.
 
 **Dependencies.** A curated pool of popular libraries (framer-motion, lucide-react, recharts,
 zustand, @tanstack/react-query, react-hook-form, zod, date-fns, three, and the common Radix
