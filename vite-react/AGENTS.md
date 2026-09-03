@@ -165,16 +165,15 @@ the build tell you.
 
 ## Where things are
 
-- `src/pages/*.tsx` - your pages (the app's routes). `src/pages/index.tsx` is `/`; the starter also
-  ships `src/pages/entries.tsx` (`/entries`), a sign-in-gated page where each user saves and sees
-  their own rows. Everything in the starter is deliberately unbranded placeholder ("Placeholder",
-  "Your important text") - rename, reshape, or delete freely; nothing in it is a direction.
-- `src/components/shell.tsx` - the shared header/nav/footer shell both starter pages wrap in. The
-  Sign in button lives here.
-- `src/trivial.manifest.json` - the data model (tables + access). The starter declares one
-  owner-scoped `entries` table; edit or remove it like anything else.
+- `src/pages/*.tsx` - your pages (the app's routes). `src/pages/index.tsx` is `/`. The starter ships
+  ONE page and it says only "Nothing here yet." - the app starts empty on purpose, so the first
+  thing on the page is the maker's, not a placeholder to imitate. Write pages, headers, footers and
+  navigation as the design calls for them; there is no shared shell to wrap in.
+- `src/trivial.manifest.json` - the data model (tables + access). The starter declares NO data:
+  create the file when the app needs a table, and the platform takes it from there. Sign-in turns on
+  with the first non-public table; until then the app is a static page and needs no account.
 - `src/lib/trivial-data.ts` - the data SDK (`useTable`, `db`). `src/lib/trivial-tables.ts` - generated row types.
-- `src/lib/trivial-auth.ts` - the auth toolkit.
+- `src/lib/trivial-auth.ts` - the auth toolkit (use it only once the app has an account to sign into).
 - `handlers/` - server routes (see `handlers/README.md`).
 - `jobs/` - work that runs on a schedule, with no URL (see `jobs/README.md`).
 - `DESIGN.md` - the design system (read before styling).
