@@ -145,7 +145,7 @@ signed-in/out states - never password forms. Auth turns on when a non-public tab
 stock URL. Full rules, including motion, imagery and 3D: `DESIGN.md`.
 
 **Dependencies.** A curated pool of popular libraries (framer-motion, lucide-react, recharts,
-zustand, @tanstack/react-query, react-hook-form, zod, date-fns, three, and the common Radix
+zustand, @tanstack/react-query, react-hook-form + zod + @hookform/resolvers, date-fns, three, and the common Radix
 primitives) auto-installs on any plan when you import it and save (the full pool list ships in
 the docs: https://docs.trivial.so/md/reference/dependencies.md). Packages outside the pool work
 within the plan's dependency quota:
