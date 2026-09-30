@@ -96,12 +96,21 @@ export interface FileRef {
   type: string;
 }
 
-/** Thrown on any non-2xx data-API response. `status` mirrors the HTTP status (e.g. 401, 403, 404). */
+/** Thrown on any non-2xx data-API response. `status` mirrors the HTTP status.
+ * `code`, when present, is the server's machine-readable outcome. A 503 alone
+ * cannot distinguish confirmed cleanup from an unconfirmed upload. */
 export class TrivialDataError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(public readonly status: number, message: string, public readonly code?: string) {
     super(message);
     this.name = 'TrivialDataError';
   }
+}
+
+function responseError(status: number, data: unknown, fallback: string): TrivialDataError {
+  const body = data as { error?: unknown; code?: unknown } | null | undefined;
+  return new TrivialDataError(status,
+    typeof body?.error === 'string' && body.error ? body.error : fallback,
+    typeof body?.code === 'string' ? body.code : undefined);
 }
 
 // Same-origin: dataApiBaseUrl is '' → baseUrl() is '' → tableUrl() is the RELATIVE
@@ -160,8 +169,7 @@ async function request<T>(method: string, url: string, body?: Row): Promise<T> {
     data = undefined;
   }
   if (!res.ok) {
-    const msg = (data as { error?: string })?.error || `Request failed (${res.status})`;
-    throw new TrivialDataError(res.status, msg);
+    throw responseError(res.status, data, `Request failed (${res.status})`);
   }
   return data as T;
 }
@@ -252,7 +260,7 @@ export const db = {
     let data: unknown;
     try { data = text ? JSON.parse(text) : undefined; } catch { data = undefined; }
     if (!res.ok) {
-      throw new TrivialDataError(res.status, (data as { error?: string })?.error || `Upload failed (${res.status})`);
+      throw responseError(res.status, data, `Upload failed (${res.status})`);
     }
     return data as FileRef;
   },
@@ -280,7 +288,10 @@ export const db = {
     const token = await getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(fileUrlFor(ref.id), { headers, credentials: 'omit' });
-    if (!res.ok) throw new TrivialDataError(res.status, `Could not load the file (${res.status})`);
+    if (!res.ok) {
+      const data: unknown = await res.json().catch(() => undefined);
+      throw responseError(res.status, data, `Could not load the file (${res.status})`);
+    }
     return URL.createObjectURL(await res.blob());
   },
 };
