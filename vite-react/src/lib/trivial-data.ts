@@ -96,6 +96,25 @@ export interface FileRef {
   type: string;
 }
 
+/** Keep this privately BEFORE calling upload with it. It can be serialized for
+ * recovery after reload; never put it in a URL, shared row, log or file reference.
+ * The SDK does not persist it or rotate its token for you. */
+export interface UploadRequest {
+  readonly version: 1;
+  readonly token: string;
+  readonly projectId: string;
+  readonly endpoint: string;
+  readonly userId: string | null;
+}
+
+export type UploadStatus =
+  | { state: 'complete'; file: FileRef }
+  | { state: 'retired'; code: 'RUN_BLOB_RETIRED' }
+  | { state: 'removed'; code: 'RUN_BLOB_REMOVED' }
+  | { state: 'unconfirmed'; code: 'RUN_BLOB_UNCONFIRMED' }
+  /** Absence is only an observation: an earlier request may still commit. */
+  | { state: 'not_found'; code: 'RUN_BLOB_REQUEST_NOT_FOUND' };
+
 /** Thrown on any non-2xx data-API response. `status` mirrors the HTTP status.
  * `code`, when present, is the server's machine-readable outcome. A 503 alone
  * cannot distinguish confirmed cleanup from an unconfirmed upload. */
@@ -120,6 +139,107 @@ function responseError(status: number, data: unknown, fallback: string): Trivial
 const baseUrl = (): string => config.dataApiBaseUrl.replace(/\/$/, '');
 const tableUrl = (table: string): string =>
   `${baseUrl()}/api/data/${encodeURIComponent(config.projectId)}/${encodeURIComponent(table)}`;
+
+function uploadEndpoint(): string {
+  requireConfigured();
+  // Do not add an auth-toolkit import: a project can own an older auth file when
+  // the absent data SDK is first vendored. This is the existing preview signal.
+  const preview = typeof window === 'undefined' ? null
+    : (window as unknown as { __TRIVIAL_VIEWAS__?: unknown }).__TRIVIAL_VIEWAS__;
+  if (preview && typeof preview === 'object') {
+    throw new TrivialDataError(412, 'Recoverable uploads are not yet available in Local. Keep the original request for its Live app.', 'RUN_BLOB_RECOVERY_UNAVAILABLE');
+  }
+  return new URL(`${baseUrl()}/api/files/${encodeURIComponent(config.projectId)}`,
+    typeof location === 'undefined' ? undefined : location.href).href;
+}
+
+function uploadUserId(token: string | null): string | null {
+  if (!token) return null;
+  // This binds the request to the credential actually sent, including a token
+  // refreshed during getToken(). It grants no authority; the server verifies it.
+  try {
+    const encoded = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    if (typeof payload?.sub === 'string' && payload.sub) return payload.sub;
+  } catch { /* Never turn an unreadable signed-in credential into anonymous. */ }
+  throw new TrivialDataError(412, 'The upload caller could not be identified. Sign in again before preparing an upload.', 'RUN_BLOB_REQUEST_IDENTITY');
+}
+
+function retainedUploadRequest(value: UploadRequest): UploadRequest {
+  if (!value || value.version !== 1 || typeof value.token !== 'string'
+    || !/^[a-f0-9]{64}$/.test(value.token) || typeof value.projectId !== 'string'
+    || typeof value.endpoint !== 'string'
+    || !(value.userId === null || (typeof value.userId === 'string' && value.userId))) {
+    throw new TrivialDataError(400, 'Use the original request returned by prepareUpload().', 'RUN_BLOB_REQUEST_TOKEN');
+  }
+  // Copy before any await so caller-side mutation cannot redirect an in-flight
+  // request or replace its token between the status check and the POST.
+  const request = Object.freeze({ version: 1 as const, token: value.token,
+    projectId: value.projectId, endpoint: value.endpoint, userId: value.userId });
+  assertUploadScope(request);
+  return request;
+}
+
+function assertUploadScope(request: UploadRequest): void {
+  if (request.endpoint !== uploadEndpoint() || request.projectId !== config.projectId) {
+    throw new TrivialDataError(412, 'Open the original app to check or send this upload request.', 'RUN_BLOB_REQUEST_SCOPE');
+  }
+}
+
+async function uploadHeaders(request: UploadRequest): Promise<Record<string, string>> {
+  assertUploadScope(request);
+  const headers: Record<string, string> = { 'X-Trivial-Upload-Token': request.token };
+  // An original anonymous request remains anonymous even after sign-in. A
+  // signed-in request requires that same user again, never another identity.
+  if (request.userId !== null) {
+    const token = await getToken();
+    if (!token || uploadUserId(token) !== request.userId) {
+      throw new TrivialDataError(412, 'Sign in as the original upload caller to continue this request.', 'RUN_BLOB_REQUEST_IDENTITY');
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
+  assertUploadScope(request);
+  return headers;
+}
+
+function uploadFileRef(value: unknown): FileRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const ref = value as FileRef;
+  if (typeof ref.id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(ref.id)
+    || !(ref.name === null || typeof ref.name === 'string') || !Number.isSafeInteger(ref.size)
+    || ref.size < 0 || typeof ref.type !== 'string' || !ref.type) return null;
+  return { id: ref.id, name: ref.name, size: ref.size, type: ref.type };
+}
+
+async function readUploadStatus(request: UploadRequest, headers: Record<string, string>): Promise<UploadStatus> {
+  assertUploadScope(request);
+  const res = await fetch(`${request.endpoint}/uploads/status`, {
+    method: 'GET', headers, credentials: 'omit', cache: 'no-store', redirect: 'error',
+  });
+  const body = await res.json().catch(() => null);
+  if (res.status === 404 && body?.code === 'RUN_BLOB_REQUEST_NOT_FOUND') {
+    return { state: 'not_found', code: 'RUN_BLOB_REQUEST_NOT_FOUND' };
+  }
+  if (res.status === 404) {
+    throw new TrivialDataError(412, 'This app runtime does not support recoverable uploads. Keep the original request.', 'RUN_BLOB_RECOVERY_UNAVAILABLE');
+  }
+  if (!res.ok) throw responseError(res.status, body, `Upload status failed (${res.status})`);
+  if (res.status === 200 && body?.state === 'complete') {
+    const file = uploadFileRef(body.file);
+    if (file) return { state: 'complete', file };
+  }
+  if (res.status === 200 && body?.state === 'retired' && body.code === 'RUN_BLOB_RETIRED') {
+    return { state: 'retired', code: 'RUN_BLOB_RETIRED' };
+  }
+  if (res.status === 200 && body?.state === 'removed' && body.code === 'RUN_BLOB_REMOVED') {
+    return { state: 'removed', code: 'RUN_BLOB_REMOVED' };
+  }
+  if (res.status === 202 && body?.state === 'unconfirmed' && body.code === 'RUN_BLOB_UNCONFIRMED') {
+    return { state: 'unconfirmed', code: 'RUN_BLOB_UNCONFIRMED' };
+  }
+  throw new TrivialDataError(502, 'The upload status response was invalid. Keep the original request.', 'RUN_BLOB_STATUS_INVALID');
+}
 
 /**
  * Build the read query string. The filter travels as ONE parameter holding JSON, rather than as
@@ -234,6 +354,35 @@ export const db = {
   from: <K extends keyof Tables | (string & {})>(table: K): TableQuery<RowOf<K & string>> =>
     new TableQuery<RowOf<K & string>>(table as string),
 
+  /** Prepare and privately retain a request BEFORE sending its file:
+   *
+   *   const request = await db.prepareUpload()
+   *   // Retain request in your app's private recovery state before continuing.
+   *   const ref = await db.upload(file, undefined, request)
+   *
+   * A lost response can be checked with uploadStatus(request). Keep the same
+   * request for that upload; a new token can create a second upload and charge.
+   * Recovery currently requires Live. Local support is refused before sending.
+   */
+  async prepareUpload(): Promise<UploadRequest> {
+    const endpoint = uploadEndpoint(), projectId = config.projectId;
+    const userId = uploadUserId(await getToken());
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const token = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return retainedUploadRequest({ version: 1, token, projectId, endpoint, userId });
+  },
+
+  /** Observe the original request once, without replay or polling. A complete
+   * result recovers its FileRef, not byte access or row attachment authority.
+   * not_found is not proof of failure: an earlier request may still commit.
+   * Original anonymous requests stay anonymous after sign-in; signed-in ones
+   * require the original user. No credential or token is persisted by the SDK.
+   */
+  async uploadStatus(value: UploadRequest): Promise<UploadStatus> {
+    const request = retainedUploadRequest(value);
+    return readUploadStatus(request, await uploadHeaders(request));
+  },
+
   /**
    * Upload a file and get the reference to save in a `file` column.
    *
@@ -244,23 +393,43 @@ export const db = {
    * the reference to a row, the file is visible only to you — which is what lets you show a preview
    * before submitting.
    */
-  async upload(file: Blob, name?: string): Promise<FileRef> {
+  async upload(file: Blob, name?: string, value?: UploadRequest): Promise<FileRef> {
     requireConfigured();
+    const request = value === undefined ? null : retainedUploadRequest(value);
     const headers: Record<string, string> = {
       'Content-Type': file.type || 'application/octet-stream',
     };
     const label = name ?? (file as File).name;
     if (label) headers['X-Trivial-Filename'] = label;
-    const token = await getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${baseUrl()}/api/files/${encodeURIComponent(config.projectId)}`, {
+    if (request) {
+      const authorization = await uploadHeaders(request);
+      Object.assign(headers, authorization);
+      // Detect an older/Local runtime before sending bytes. A missing receipt
+      // is not proof of failure; the server's atomic token binding still decides
+      // admission if an earlier POST races this explicit same-token attempt.
+      const status = await readUploadStatus(request, authorization);
+      if (status.state !== 'not_found') {
+        throw new TrivialDataError(409, 'This request already has an upload outcome. Check uploadStatus() before starting another upload.', 'RUN_BLOB_REQUEST_EXISTS');
+      }
+      assertUploadScope(request);
+    } else {
+      const token = await getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    const res = await fetch(request?.endpoint ?? `${baseUrl()}/api/files/${encodeURIComponent(config.projectId)}`, {
       method: 'POST', headers, credentials: 'omit', body: file,
+      ...(request ? { redirect: 'error' as const, cache: 'no-store' as const } : {}),
     });
     const text = await res.text();
     let data: unknown;
     try { data = text ? JSON.parse(text) : undefined; } catch { data = undefined; }
     if (!res.ok) {
       throw responseError(res.status, data, `Upload failed (${res.status})`);
+    }
+    if (request) {
+      const ref = res.status === 201 ? uploadFileRef(data) : null;
+      if (!ref) throw new TrivialDataError(502, 'The upload response was invalid. Check the original request status before sending again.', 'RUN_BLOB_RESPONSE_INVALID');
+      return ref;
     }
     return data as FileRef;
   },
