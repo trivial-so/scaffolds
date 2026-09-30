@@ -99,13 +99,18 @@ export interface FileRef {
 /** Keep this privately BEFORE calling upload with it. It can be serialized for
  * recovery after reload; never put it in a URL, shared row, log or file reference.
  * The SDK does not persist it or rotate its token for you. */
-export interface UploadRequest {
-  readonly version: 1;
+interface UploadRequestFields {
   readonly token: string;
   readonly projectId: string;
   readonly endpoint: string;
   readonly userId: string | null;
 }
+
+/** Version 1 binds a Live caller; version 2 binds a Local storage epoch. */
+export type UploadRequest = UploadRequestFields & (
+  | { readonly version: 1 }
+  | { readonly version: 2; readonly localEpoch: string }
+);
 
 export type UploadStatus =
   | { state: 'complete'; file: FileRef }
@@ -140,17 +145,34 @@ const baseUrl = (): string => config.dataApiBaseUrl.replace(/\/$/, '');
 const tableUrl = (table: string): string =>
   `${baseUrl()}/api/data/${encodeURIComponent(config.projectId)}/${encodeURIComponent(table)}`;
 
-function uploadEndpoint(): string {
-  requireConfigured();
-  // Do not add an auth-toolkit import: a project can own an older auth file when
-  // the absent data SDK is first vendored. This is the existing preview signal.
+function uploadPreview(): { userId: string | null } | null {
+  // Read the existing preview signal; owned older auth files need no new export.
   const preview = typeof window === 'undefined' ? null
     : (window as unknown as { __TRIVIAL_VIEWAS__?: unknown }).__TRIVIAL_VIEWAS__;
-  if (preview && typeof preview === 'object') {
-    throw new TrivialDataError(412, 'Recoverable uploads are not yet available in Local. Keep the original request for its Live app.', 'RUN_BLOB_RECOVERY_UNAVAILABLE');
+  if (!preview || typeof preview !== 'object') return null;
+  const userId = (preview as { userId?: unknown }).userId;
+  if (userId == null || userId === '') return { userId: null };
+  if (typeof userId !== 'string' || userId.length > 128) {
+    throw new TrivialDataError(412, 'The Local upload caller could not be identified.', 'RUN_BLOB_REQUEST_IDENTITY');
   }
+  return { userId };
+}
+
+function uploadEndpoint(): string {
+  requireConfigured();
   return new URL(`${baseUrl()}/api/files/${encodeURIComponent(config.projectId)}`,
     typeof location === 'undefined' ? undefined : location.href).href;
+}
+
+const uploadEpoch = (value: unknown): value is string => typeof value === 'string'
+  && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
+
+function assertLocalUploadEndpoint(endpoint: string): void {
+  let sameOrigin = false;
+  try { sameOrigin = typeof location !== 'undefined' && new URL(endpoint).origin === new URL(location.href).origin; } catch { /* Invalid retained URL refuses below. */ }
+  if (!sameOrigin) {
+    throw new TrivialDataError(412, 'Local uploads require the original project preview.', 'RUN_BLOB_REQUEST_SCOPE');
+  }
 }
 
 function uploadUserId(token: string | null): string | null {
@@ -167,7 +189,8 @@ function uploadUserId(token: string | null): string | null {
 }
 
 function retainedUploadRequest(value: UploadRequest): UploadRequest {
-  if (!value || value.version !== 1 || typeof value.token !== 'string'
+  if (!value || (value.version !== 1 && value.version !== 2)
+    || (value.version === 2 && !uploadEpoch(value.localEpoch)) || typeof value.token !== 'string'
     || !/^[a-f0-9]{64}$/.test(value.token) || typeof value.projectId !== 'string'
     || typeof value.endpoint !== 'string'
     || !(value.userId === null || (typeof value.userId === 'string' && value.userId))) {
@@ -175,13 +198,25 @@ function retainedUploadRequest(value: UploadRequest): UploadRequest {
   }
   // Copy before any await so caller-side mutation cannot redirect an in-flight
   // request or replace its token between the status check and the POST.
-  const request = Object.freeze({ version: 1 as const, token: value.token,
-    projectId: value.projectId, endpoint: value.endpoint, userId: value.userId });
+  const fields = { token: value.token, projectId: value.projectId, endpoint: value.endpoint, userId: value.userId };
+  const request: UploadRequest = Object.freeze(value.version === 2
+    ? { ...fields, version: 2 as const, localEpoch: value.localEpoch }
+    : { ...fields, version: 1 as const });
   assertUploadScope(request);
   return request;
 }
 
 function assertUploadScope(request: UploadRequest): void {
+  const preview = uploadPreview();
+  if (request.version === 2) {
+    if (!preview) throw new TrivialDataError(412, 'Open the original Local preview to continue this request.', 'RUN_BLOB_REQUEST_SCOPE');
+    assertLocalUploadEndpoint(request.endpoint);
+    if (request.userId !== null && request.userId !== preview.userId) {
+      throw new TrivialDataError(412, 'Preview as the original upload caller to continue this request.', 'RUN_BLOB_REQUEST_IDENTITY');
+    }
+  } else if (preview) {
+    throw new TrivialDataError(412, 'Open the original Live app to continue this request.', 'RUN_BLOB_REQUEST_SCOPE');
+  }
   if (request.endpoint !== uploadEndpoint() || request.projectId !== config.projectId) {
     throw new TrivialDataError(412, 'Open the original app to check or send this upload request.', 'RUN_BLOB_REQUEST_SCOPE');
   }
@@ -190,6 +225,12 @@ function assertUploadScope(request: UploadRequest): void {
 async function uploadHeaders(request: UploadRequest): Promise<Record<string, string>> {
   assertUploadScope(request);
   const headers: Record<string, string> = { 'X-Trivial-Upload-Token': request.token };
+  if (request.version === 2) {
+    headers['X-Trivial-Upload-Epoch'] = request.localEpoch;
+    headers['X-Trivial-Upload-Identity'] = JSON.stringify(request.userId).replace(/[^\x20-\x7e]/g,
+      char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+    return headers;
+  }
   // An original anonymous request remains anonymous even after sign-in. A
   // signed-in request requires that same user again, never another identity.
   if (request.userId !== null) {
@@ -362,14 +403,34 @@ export const db = {
    *
    * A lost response can be checked with uploadStatus(request). Keep the same
    * request for that upload; a new token can create a second upload and charge.
-   * Recovery currently requires Live. Local support is refused before sending.
+   * Local requests also retain their device storage epoch; older runtimes refuse.
    */
   async prepareUpload(): Promise<UploadRequest> {
     const endpoint = uploadEndpoint(), projectId = config.projectId;
-    const userId = uploadUserId(await getToken());
+    const preview = uploadPreview();
+    let localEpoch: string | undefined;
+    const userId = preview ? preview.userId : uploadUserId(await getToken());
+    if (preview) {
+      assertLocalUploadEndpoint(endpoint);
+      const response = await fetch(`${endpoint}/uploads/limits`, {
+        credentials: 'omit', redirect: 'error', cache: 'no-store',
+      });
+      let limits: { protocol?: unknown; recoveryProtocol?: unknown; epoch?: unknown } | null = null;
+      try { limits = await response.json(); } catch { /* Old runtimes must not accept bytes. */ }
+      if (!response.ok && response.status !== 404) {
+        throw responseError(response.status, limits, 'Local upload recovery could not be checked.');
+      }
+      if (response.status !== 200 || limits?.protocol !== 'local-file-intake-v1'
+        || limits.recoveryProtocol !== 'local-file-receipts-v1' || !uploadEpoch(limits.epoch)) {
+        throw new TrivialDataError(412, 'Recoverable Local uploads are unavailable. Reload the project before preparing a request.', 'RUN_BLOB_RECOVERY_UNAVAILABLE');
+      }
+      localEpoch = limits.epoch;
+    }
     const bytes = crypto.getRandomValues(new Uint8Array(32));
     const token = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-    return retainedUploadRequest({ version: 1, token, projectId, endpoint, userId });
+    return retainedUploadRequest(localEpoch
+      ? { version: 2, token, projectId, endpoint, userId, localEpoch }
+      : { version: 1, token, projectId, endpoint, userId });
   },
 
   /** Observe the original request once, without replay or polling. A complete
@@ -389,9 +450,9 @@ export const db = {
    *   const ref = await db.upload(input.files[0])
    *   await db.from('posts').insert({ title, photo: ref })
    *
-   * The bytes are sent as the request body, so nothing is copied into memory first. Until you save
-   * the reference to a row, the file is visible only to you — which is what lets you show a preview
-   * before submitting.
+   * The Blob is sent as the request body. The Local runtime uses bounded buffering.
+   * Save the returned reference to a row to attach the file to the app's data;
+   * upload success alone does not confirm a row attachment.
    */
   async upload(file: Blob, name?: string, value?: UploadRequest): Promise<FileRef> {
     requireConfigured();
@@ -404,7 +465,7 @@ export const db = {
     if (request) {
       const authorization = await uploadHeaders(request);
       Object.assign(headers, authorization);
-      // Detect an older/Local runtime before sending bytes. A missing receipt
+      // Require the exact recovery contract before sending bytes. A missing receipt
       // is not proof of failure; the server's atomic token binding still decides
       // admission if an earlier POST races this explicit same-token attempt.
       const status = await readUploadStatus(request, authorization);
